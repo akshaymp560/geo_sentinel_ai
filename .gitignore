@@ -16,3 +16,11 @@ runs/
 # Binaries & local secrets
 cloudflared.exe
 .env
+
+# ChangeFormer unnecessary training logs & environments
+model/ChangeFormer/venv/
+model/ChangeFormer/CD_*
+model/ChangeFormer/data/
+model/ChangeFormer/samples_*
+
+*.zip
