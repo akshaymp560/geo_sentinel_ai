@@ -4,13 +4,15 @@ from typing import List
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-# Dynamically link the ChangeFormer model pipeline and backend packages
+# --- Path Configurations ---
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(CURRENT_DIR)
 MODEL_SRC_DIR = os.path.join(BASE_DIR, "model", "ChangeFormer", "src")
-RUNS_DATA_DIR = os.path.join(BASE_DIR, "model", "ChangeFormer", "data", "runs")
+RUNS_DATA_DIR = os.path.join(BASE_DIR, "runs")
+FRONTEND_DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
 
 if MODEL_SRC_DIR not in sys.path:
     sys.path.append(MODEL_SRC_DIR)
@@ -22,14 +24,14 @@ from visualizer import generate_rgb_preview, generate_mask_overlay, generate_tri
 from fusion.evidence_fusion import EvidenceFusionEngine
 from services.qwen_service import QwenMultimodalReasoningService
 
-# Initialize FastAPI application
+# --- Initialize FastAPI Application ---
 app = FastAPI(
     title="GeoSentinel-AI API",
     description="Automated Sentinel-2 Change Detection Engine with Siamese ViT, Multi-Agent Swarm & Multimodal Qwen Dossier",
     version="1.0.0"
 )
 
-# Enable CORS for React frontend
+# Enable CORS for React frontend & public tunneling
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,10 +39,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Mount runs directory as static endpoint for preview assets
-os.makedirs(RUNS_DATA_DIR, exist_ok=True)
-app.mount("/static/runs", StaticFiles(directory=RUNS_DATA_DIR), name="runs")
 
 # Singletons initialized on startup
 pipeline_instance = None
@@ -59,7 +57,7 @@ def startup_event():
     print("[API Startup] GeoSentinel-AI Engine ready for inference and evidence swarms.")
 
 
-# --- Request and Response Schemas ---
+# --- Request Schema ---
 class DetectionRequest(BaseModel):
     bbox: List[float] = Field(
         ..., 
@@ -71,11 +69,11 @@ class DetectionRequest(BaseModel):
     post_start: str = Field(..., example="2024-12-01")
     post_end: str = Field(..., example="2025-01-30")
     threshold: float = Field(default=0.5, ge=0.0, le=1.0)
-    include_agent_swarm: bool = Field(default=True, description="Whether to execute the multi-agent evidence swarm")
-    generate_dossier: bool = Field(default=True, description="Whether to generate the multimodal AI disaster dossier")
+    include_agent_swarm: bool = Field(default=True)
+    generate_dossier: bool = Field(default=True)
 
 
-# --- Endpoints ---
+# --- Core API Endpoints ---
 @app.get("/api/health")
 def health_check():
     return {
@@ -90,6 +88,7 @@ def health_check():
 
 @app.post("/api/detect-change")
 def detect_change(payload: DetectionRequest, request: Request):
+    global pipeline_instance, fusion_engine, qwen_service
     if pipeline_instance is None or fusion_engine is None or qwen_service is None:
         raise HTTPException(status_code=503, detail="Engines not fully initialized.")
 
@@ -159,10 +158,44 @@ def detect_change(payload: DetectionRequest, request: Request):
                 )
                 result["intelligence_dossier"] = dossier_model.model_dump()
 
+        result["status"] = "COMPLETED"
         return result
 
     except Exception as e:
+        print(f"[API Error] Pipeline processing failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Pipeline processing failed: {str(e)}")
+
+
+# --- Static Artifact & SPA Route Handlers ---
+os.makedirs(RUNS_DATA_DIR, exist_ok=True)
+
+# 1. Dedicated Run Artifact Handler (Guarantees PNG/GeoTIFF delivery)
+@app.get("/static/runs/{file_path:path}")
+async def serve_run_artifacts(file_path: str):
+    target_file = os.path.join(RUNS_DATA_DIR, file_path)
+    if os.path.isfile(target_file):
+        return FileResponse(target_file)
+    raise HTTPException(status_code=404, detail="Artifact file not found")
+
+# 2. Mount compiled React assets (JS & CSS bundles)
+assets_dir = os.path.join(FRONTEND_DIST_DIR, "assets")
+if os.path.exists(assets_dir):
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend_assets")
+
+# 3. SPA Fallback for client routing (Never intercepts /api or /static)
+@app.get("/{full_path:path}")
+async def serve_spa(full_path: str):
+    if full_path.startswith("api/") or full_path.startswith("static/"):
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    target_file = os.path.join(FRONTEND_DIST_DIR, full_path)
+    if full_path and os.path.isfile(target_file):
+        return FileResponse(target_file)
+
+    index_file = os.path.join(FRONTEND_DIST_DIR, "index.html")
+    if os.path.exists(index_file):
+        return FileResponse(index_file)
+    return {"message": "Frontend build not found. Please run npm run build."}
 
 
 if __name__ == "__main__":

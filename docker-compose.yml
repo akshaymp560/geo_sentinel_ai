@@ -1,21 +1,38 @@
-# /docker-compose.yml
 version: '3.8'
 
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: geosentinel-backend
+    restart: unless-stopped
     ports:
       - "8000:8000"
     volumes:
-      # Mount the model weights so Docker can access them without copying gigabytes of data
+      # Mount model weights and runs data directory
       - ./model:/app/model
+      # Mount local Earth Engine credentials for authentication
+      - ${USERPROFILE}/.config/earthengine:/root/.config/earthengine:ro
     environment:
-      - QWEN_API_KEY=${QWEN_API_KEY}
-      - EE_PROJECT_ID=geosentinel-ai-511016
+      - PYTHONUNBUFFERED=1
+      - GEE_PROJECT_ID=geosentinel-ai-511016
+    networks:
+      - geosentinel-net
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: geosentinel-frontend
+    restart: unless-stopped
     ports:
       - "5173:80"
     depends_on:
       - backend
+    networks:
+      - geosentinel-net
+
+networks:
+  geosentinel-net:
+    driver: bridge

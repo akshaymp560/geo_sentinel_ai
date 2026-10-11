@@ -1,0 +1,18 @@
+# Virtual environments & Python cache
+venv/
+**/venv/
+__pycache__/
+*.pyc
+
+# Node modules & temporary builds
+node_modules/
+**/node_modules/
+frontend/dist/
+
+# Run logs and test artifacts (prevents massive upload)
+runs/
+*.tif
+
+# Binaries & local secrets
+cloudflared.exe
+.env
